@@ -42,6 +42,9 @@ services:
   api:
     <<: *app
     command: ["python", "-m", "taskqueue.api"]
+    environment:
+      <<: *app-env
+      API_WORKERS: ${API_WORKERS:-4}
     ports:
       - "8000:8000"
     depends_on:
@@ -116,6 +119,16 @@ services:
     depends_on:
       mysql: { condition: service_healthy }
       redis: { condition: service_healthy }
+
+  k6:
+    image: grafana/k6:0.54.0
+    profiles: ["load"]
+    volumes:
+      - ./loadtest:/scripts:ro
+    environment:
+      API_URL: http://api:8000
+    depends_on:
+      api: { condition: service_healthy }
 
 volumes:
   mysql-data:

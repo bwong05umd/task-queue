@@ -45,6 +45,12 @@ replay it.
 (`POLL_INTERVAL`). That adds up to 100ms of pickup latency when the queue is idle.
 `BLMOVE` into a per-worker list would remove it but complicates lease tracking.
 
+**API processes and TCP_NODELAY.** The API runs `API_WORKERS` uvicorn
+processes (default 4) sharing one listening socket that we bind ourselves with
+an explicit `IPPROTO_TCP`. With uvicorn's own socket, asyncio skips
+`TCP_NODELAY` and keep-alive responses stall about 40 ms (see the load-test
+section of the README).
+
 **Known limits.** Redis loses up to ~1s of writes on a hard crash (`appendfsync
 everysec`); reconcile recovers those jobs after `RECONCILE_AFTER_SECONDS`. If
 Redis loses a `processing` entry while the job is still running, reconcile may

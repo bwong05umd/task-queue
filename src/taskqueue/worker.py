@@ -138,6 +138,7 @@ class Worker:
         if self._db(self.store.complete, job_id, token, result):
             self.broker.ack(job_id)
             metrics.JOBS_SUCCEEDED.labels(job_type).inc()
+            metrics.JOB_END_TO_END.labels(job_type).observe(job["age_us"] / 1e6 + elapsed)
             log.info("job succeeded", extra=logs.fields(duration_seconds=round(elapsed, 4)))
         else:
             self._stale(job_type)

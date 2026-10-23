@@ -23,6 +23,10 @@ JOB_DURATION = Histogram(
     "tq_job_duration_seconds", "Handler run time", ["type", "outcome"],
     buckets=(0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120),
 )
+JOB_END_TO_END = Histogram(
+    "tq_job_end_to_end_seconds", "Submission to success, including queue wait and retries", ["type"],
+    buckets=(0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, 600),
+)
 LEASES_REAPED = Counter("tq_leases_reaped_total", "Expired leases put back on the queue")
 RETRIES_PROMOTED = Counter("tq_retries_promoted_total", "Delayed retries moved onto the queue")
 JOBS_RECONCILED = Counter("tq_jobs_reconciled_total", "Jobs re-pushed after going missing from Redis")

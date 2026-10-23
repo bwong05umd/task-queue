@@ -159,7 +159,11 @@ class JobStore:
                      "WHERE job_id = :id AND finished_at IS NULL"),
                 {"id": job_id},
             )
-            job = _job(c.execute(text(f"SELECT {_JOB_COLUMNS} FROM jobs WHERE id = :id"), {"id": job_id}).one())
+            job = _job(c.execute(
+                text(f"SELECT {_JOB_COLUMNS}, TIMESTAMPDIFF(MICROSECOND, created_at, NOW(3)) AS age_us "
+                     "FROM jobs WHERE id = :id"),
+                {"id": job_id},
+            ).one())
             c.execute(
                 text("INSERT INTO job_attempts (job_id, attempt, worker_id, run_token, started_at) "
                      "VALUES (:id, :attempt, :worker, :token, NOW(3))"),

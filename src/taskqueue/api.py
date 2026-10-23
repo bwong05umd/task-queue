@@ -1,6 +1,7 @@
 """HTTP API: submit jobs, read their status, and manage the dead-letter queue."""
 
 import logging
+import socket
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -160,11 +161,41 @@ def create_app(settings: config.Settings | None = None, store: JobStore | None =
     return app
 
 
-def main() -> None:
-    import uvicorn
-
+def app_factory() -> FastAPI:
+    """Entry point for each uvicorn worker process, which needs its own logging setup."""
     logs.setup("api")
-    uvicorn.run(create_app(), host="0.0.0.0", port=8000, log_config=None, access_log=False)
+    return create_app()
+
+
+def listen_socket(host: str, port: int) -> socket.socket:
+    """A listening socket shared by the uvicorn worker processes.
+
+    The protocol must be IPPROTO_TCP explicitly: asyncio only sets TCP_NODELAY
+    on accepted connections whose socket reports proto == IPPROTO_TCP, and
+    uvicorn's own bind_socket() leaves it 0. Without TCP_NODELAY, Nagle's
+    algorithm plus delayed ACKs stall every keep-alive response by ~40 ms
+    (found in the Milestone 6 load test; see the README)."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind((host, port))
+    sock.set_inheritable(True)
+    return sock
+
+
+def main() -> None:
+    import os
+
+    import uvicorn
+    from uvicorn.supervisors import Multiprocess
+
+    workers = int(os.environ.get("API_WORKERS", "4"))
+    config = uvicorn.Config("taskqueue.api:app_factory", factory=True, host="0.0.0.0", port=8000,
+                            workers=workers, log_config=None, access_log=False)
+    server = uvicorn.Server(config)
+    if workers > 1:
+        Multiprocess(config, target=server.run, sockets=[listen_socket(config.host, config.port)]).run()
+    else:
+        server.run()
 
 
 if __name__ == "__main__":
