@@ -1,0 +1,122 @@
+name: taskqueue
+
+x-app: &app
+  build:
+    context: .
+    target: runtime
+  image: taskqueue:latest
+  env_file: .env
+  environment: &app-env
+    MYSQL_HOST: mysql
+    REDIS_URL: redis://redis:6379/0
+  restart: unless-stopped
+
+services:
+  mysql:
+    image: mysql:8.4
+    env_file: .env
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./deploy/mysql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4
+    # AOF so a Redis restart does not lose queued jobs (at most ~1s of writes;
+    # the scheduler's reconcile pass re-pushes anything MySQL still has).
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  api:
+    <<: *app
+    command: ["python", "-m", "taskqueue.api"]
+    ports:
+      - "8000:8000"
+    depends_on:
+      mysql: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  worker:
+    <<: *app
+    command: ["python", "-m", "taskqueue.worker"]
+    deploy:
+      replicas: 3
+    stop_grace_period: 30s
+    depends_on:
+      api: { condition: service_healthy }  # the API creates the schema
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9100/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  scheduler:
+    <<: *app
+    command: ["python", "-m", "taskqueue.scheduler"]
+    depends_on:
+      api: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9100/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/taskqueue.json
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on: [prometheus]
+    restart: unless-stopped
+
+  tests:
+    build:
+      context: .
+      target: test
+    image: taskqueue:test
+    profiles: ["test"]
+    env_file: .env
+    environment:
+      <<: *app-env
+      MYSQL_DATABASE: taskqueue_test
+      REDIS_URL: redis://redis:6379/15
+      KEY_PREFIX: "tqtest:"
+    depends_on:
+      mysql: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+volumes:
+  mysql-data:
+  redis-data:

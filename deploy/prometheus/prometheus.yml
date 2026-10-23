@@ -1,0 +1,23 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: api
+    static_configs:
+      - targets: ["api:8000"]
+
+  # Every replica of a Compose service resolves under the service name, so DNS
+  # discovery finds all workers however far you scale them.
+  - job_name: worker
+    dns_sd_configs:
+      - names: ["worker"]
+        type: A
+        port: 9100
+        refresh_interval: 5s
+
+  - job_name: scheduler
+    dns_sd_configs:
+      - names: ["scheduler"]
+        type: A
+        port: 9100
+        refresh_interval: 5s
