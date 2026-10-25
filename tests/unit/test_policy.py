@@ -28,16 +28,19 @@ def test_backoff_rejects_attempt_zero():
         policy.backoff_delay(0)
 
 
-@pytest.mark.parametrize("exc, retryable", [
-    (RetryableError("timeout"), True),
-    (TimeoutError(), True),
-    (ConnectionError(), True),
-    (RuntimeError("boom"), True),
-    (PermanentError("bad"), False),
-    (ValueError("not a number"), False),
-    (KeyError("to"), False),
-    (TypeError(), False),
-])
+@pytest.mark.parametrize(
+    "exc, retryable",
+    [
+        (RetryableError("timeout"), True),
+        (TimeoutError(), True),
+        (ConnectionError(), True),
+        (RuntimeError("boom"), True),
+        (PermanentError("bad"), False),
+        (ValueError("not a number"), False),
+        (KeyError("to"), False),
+        (TypeError(), False),
+    ],
+)
 def test_error_classification(exc, retryable):
     assert is_retryable(exc) is retryable
 

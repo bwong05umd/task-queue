@@ -16,7 +16,7 @@ import threading
 import time
 import traceback
 import uuid
-from typing import Callable
+from collections.abc import Callable
 
 from redis.exceptions import RedisError
 from sqlalchemy.exc import OperationalError
@@ -31,15 +31,22 @@ log = logging.getLogger("taskqueue.worker")
 
 
 class Worker:
-    def __init__(self, settings: config.Settings, store: JobStore, broker: Broker,
-                 handlers: dict | None = None, db_retry_seconds: float = 30.0):
+    def __init__(
+        self,
+        settings: config.Settings,
+        store: JobStore,
+        broker: Broker,
+        handlers: dict | None = None,
+        db_retry_seconds: float = 30.0,
+    ):
         self.s = settings
         self.store = store
         self.broker = broker
         self.handlers = HANDLERS if handlers is None else handlers
         self.lease_ms = int(settings.lease_seconds * 1000)
         self.backoff: Callable[[int], float] = functools.partial(
-            policy.backoff_delay, base=settings.backoff_base, cap=settings.backoff_cap)
+            policy.backoff_delay, base=settings.backoff_base, cap=settings.backoff_cap
+        )
         self.db_retry_seconds = db_retry_seconds
         self.stopping = threading.Event()
         self.current_job: str | None = None
@@ -125,8 +132,10 @@ class Worker:
                 if self._db(self.store.schedule_retry, job_id, token, outcome.delay, error, tb):
                     self.broker.retry(job_id, int(outcome.delay * 1000))
                     metrics.JOBS_RETRIED.labels(job_type).inc()
-                    log.warning("job failed; retry scheduled",
-                                extra=logs.fields(error=error, delay_seconds=round(outcome.delay, 3)))
+                    log.warning(
+                        "job failed; retry scheduled",
+                        extra=logs.fields(error=error, delay_seconds=round(outcome.delay, 3)),
+                    )
                 else:
                     self._stale(job_type)
             else:
@@ -192,8 +201,12 @@ class Worker:
     def health(self) -> tuple[bool, dict]:
         age = time.monotonic() - self.last_heartbeat
         ok = age < self.s.heartbeat_seconds * 3
-        return ok, {"status": "ok" if ok else "unhealthy", "worker_id": self.s.worker_id,
-                    "heartbeat_age_seconds": round(age, 2), "current_job": self.current_job}
+        return ok, {
+            "status": "ok" if ok else "unhealthy",
+            "worker_id": self.s.worker_id,
+            "heartbeat_age_seconds": round(age, 2),
+            "current_job": self.current_job,
+        }
 
 
 def main() -> None:

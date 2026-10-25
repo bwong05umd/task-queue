@@ -1,5 +1,6 @@
 """HTTP API: submit jobs, read their status, and manage the dead-letter queue."""
 
+import hmac
 import logging
 import socket
 import time
@@ -7,7 +8,8 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import Any, Literal
 
-from fastapi import FastAPI, HTTPException, Query, Request, Response
+from fastapi import APIRouter, FastAPI, HTTPException, Query, Request, Response, Security
+from fastapi.security import APIKeyHeader
 from prometheus_client import CONTENT_TYPE_LATEST, REGISTRY, generate_latest
 from pydantic import BaseModel, Field
 from redis.exceptions import RedisError
@@ -41,8 +43,12 @@ def _wait_for_mysql(store: JobStore, timeout: float = 60.0) -> None:
             time.sleep(2)
 
 
-def create_app(settings: config.Settings | None = None, store: JobStore | None = None,
-               broker: Broker | None = None, register_metrics: bool = True) -> FastAPI:
+def create_app(
+    settings: config.Settings | None = None,
+    store: JobStore | None = None,
+    broker: Broker | None = None,
+    register_metrics: bool = True,
+) -> FastAPI:
     settings = settings or config.load()
     store = store or JobStore(settings.mysql_url)
     broker = broker or Broker(settings.redis_url, settings.key_prefix)
@@ -61,9 +67,15 @@ def create_app(settings: config.Settings | None = None, store: JobStore | None =
         started = time.monotonic()
         response = await call_next(request)
         if request.url.path not in ("/metrics", "/health"):
-            log.info("request", extra=logs.fields(
-                method=request.method, path=request.url.path, status=response.status_code,
-                duration_ms=round((time.monotonic() - started) * 1000, 2)))
+            log.info(
+                "request",
+                extra=logs.fields(
+                    method=request.method,
+                    path=request.url.path,
+                    status=response.status_code,
+                    duration_ms=round((time.monotonic() - started) * 1000, 2),
+                ),
+            )
         return response
 
     def _job_or_404(job_id: str) -> dict:
@@ -72,13 +84,25 @@ def create_app(settings: config.Settings | None = None, store: JobStore | None =
             raise HTTPException(404, "job not found")
         return job
 
-    @app.post("/jobs", status_code=201)
+    api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+    def require_api_key(key: str | None = Security(api_key_header)) -> None:
+        # Auth is off when API_KEY is unset (local development).
+        if settings.api_key and not (key and hmac.compare_digest(key, settings.api_key)):
+            raise HTTPException(401, "missing or invalid X-API-Key header")
+
+    # Everything that reads or changes jobs needs the key; /health and /metrics
+    # stay open for load balancers and Prometheus.
+    jobs = APIRouter(dependencies=[Security(require_api_key)])
+
+    @jobs.post("/jobs", status_code=201)
     def submit(body: JobIn, response: Response):
         if body.type not in HANDLERS:
             raise HTTPException(400, f"unknown job type {body.type!r}; known: {sorted(HANDLERS)}")
         job_id = str(uuid.uuid4())
-        job, created = store.create(job_id, body.type, body.payload,
-                                    body.max_attempts or settings.default_max_attempts, body.idempotency_key)
+        job, created = store.create(
+            job_id, body.type, body.payload, body.max_attempts or settings.default_max_attempts, body.idempotency_key
+        )
         if not created:
             response.status_code = 200
             return job
@@ -91,22 +115,26 @@ def create_app(settings: config.Settings | None = None, store: JobStore | None =
         log.info("job submitted", extra=logs.fields(job_id=job_id, job_type=body.type))
         return job
 
-    @app.get("/jobs")
-    def list_jobs(status: Literal["queued", "running", "succeeded", "dead"] | None = None, type: str | None = None,
-                  limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0)):
+    @jobs.get("/jobs")
+    def list_jobs(
+        status: Literal["queued", "running", "succeeded", "dead"] | None = None,
+        type: str | None = None,
+        limit: int = Query(50, ge=1, le=500),
+        offset: int = Query(0, ge=0),
+    ):
         return store.list_jobs(status, type, limit, offset)
 
-    @app.get("/jobs/{job_id}")
+    @jobs.get("/jobs/{job_id}")
     def get_job(job_id: str):
         job = _job_or_404(job_id)
         job["attempt_history"] = store.attempts(job_id)
         return job
 
-    @app.get("/dead-jobs")
+    @jobs.get("/dead-jobs")
     def list_dead(type: str | None = None, limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0)):
         return store.list_jobs(states.DEAD, type, limit, offset)
 
-    @app.post("/dead-jobs/replay")
+    @jobs.post("/dead-jobs/replay")
     def replay_by_type(type: str = Query(..., description="Replay every dead job of this type")):
         replayed = []
         for job_id in store.dead_ids(type):
@@ -116,7 +144,7 @@ def create_app(settings: config.Settings | None = None, store: JobStore | None =
         log.info("bulk replay", extra=logs.fields(job_type=type, count=len(replayed)))
         return {"replayed": replayed}
 
-    @app.get("/dead-jobs/{job_id}")
+    @jobs.get("/dead-jobs/{job_id}")
     def get_dead(job_id: str):
         job = _job_or_404(job_id)
         if job["status"] != states.DEAD:
@@ -124,7 +152,7 @@ def create_app(settings: config.Settings | None = None, store: JobStore | None =
         job["attempt_history"] = store.attempts(job_id)
         return job
 
-    @app.post("/dead-jobs/{job_id}/replay")
+    @jobs.post("/dead-jobs/{job_id}/replay")
     def replay(job_id: str):
         _job_or_404(job_id)
         if not store.replay(job_id):
@@ -133,13 +161,15 @@ def create_app(settings: config.Settings | None = None, store: JobStore | None =
         log.info("job replayed", extra=logs.fields(job_id=job_id))
         return store.get(job_id)
 
-    @app.delete("/dead-jobs")
+    @jobs.delete("/dead-jobs")
     def purge(type: str | None = None):
         ids = store.dead_ids(type, limit=10_000)
         purged = store.purge_dead(ids)
         broker.forget_dead(ids)
         log.warning("purged dead jobs", extra=logs.fields(job_type=type, count=purged))
         return {"purged": purged}
+
+    app.include_router(jobs)
 
     @app.get("/health")
     def health(response: Response):
@@ -189,8 +219,15 @@ def main() -> None:
     from uvicorn.supervisors import Multiprocess
 
     workers = int(os.environ.get("API_WORKERS", "4"))
-    config = uvicorn.Config("taskqueue.api:app_factory", factory=True, host="0.0.0.0", port=8000,
-                            workers=workers, log_config=None, access_log=False)
+    config = uvicorn.Config(
+        "taskqueue.api:app_factory",
+        factory=True,
+        host="0.0.0.0",
+        port=8000,
+        workers=workers,
+        log_config=None,
+        access_log=False,
+    )
     server = uvicorn.Server(config)
     if workers > 1:
         Multiprocess(config, target=server.run, sockets=[listen_socket(config.host, config.port)]).run()

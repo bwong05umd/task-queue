@@ -1,8 +1,8 @@
 """Retry policy: backoff math and what to do with a failed attempt."""
 
 import random
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 from .errors import is_retryable
 

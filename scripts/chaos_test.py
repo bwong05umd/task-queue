@@ -8,18 +8,24 @@
 Uses only the standard library, so it runs with any python3."""
 
 import json
+import os
 import subprocess
 import sys
 import time
 import urllib.error
 import urllib.request
 
-API = "http://localhost:8000"
+API = os.environ.get("API_URL", "http://localhost:8000")
+HEADERS = {"Content-Type": "application/json", **({"X-API-Key": k} if (k := os.environ.get("API_KEY")) else {})}
 
 
 def call(method, path, body=None):
-    req = urllib.request.Request(API + path, method=method, data=json.dumps(body).encode() if body else None,
-                                 headers={"Content-Type": "application/json"})
+    req = urllib.request.Request(
+        API + path,
+        method=method,
+        data=json.dumps(body).encode() if body else None,
+        headers=HEADERS,
+    )
     with urllib.request.urlopen(req, timeout=10) as r:
         return json.load(r)
 

@@ -52,7 +52,7 @@ function nextJob() {
 
 export default function () {
   const res = http.post(`${API}/jobs`, JSON.stringify(nextJob()), {
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(__ENV.API_KEY ? { 'X-API-Key': __ENV.API_KEY } : {}) },
   });
   check(res, { 'accepted (201)': (r) => r.status === 201 });
 }

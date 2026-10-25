@@ -2,11 +2,13 @@
 
 Mini Celery/Sidekiq in Python: FastAPI API, workers, scheduler (reaper, retry
 promoter, reconciler), Redis broker, MySQL source of truth. Build plan lives in
-the "Task Queue Build Plan" Claude Doc; Milestones 1-6 are done, 7 (CI,
-deploy, README polish) is next.
+the "Task Queue Build Plan" Claude Doc; Milestones 1-7 are done (stretch
+goals are next).
 
 - Run: `docker compose up -d` (needs `.env`, see `.env.example`)
 - Tests: `docker compose --profile test run --rm tests`; drills: `python3 scripts/chaos_test.py`
+- Lint: ruff (`ruff check . && ruff format --check .`); CI in `.github/workflows/ci.yml`
+- Demo: `python3 scripts/demo.py`; deploy: `DEPLOY_HOST=user@vm scripts/deploy.sh` (see README)
 - Load tests: `python3 scripts/loadtest.py ...` (wipes dev jobs first); results in README
 - Code: `src/taskqueue/`; Lua scripts in `broker.py`; all SQL in `db.py`
 - Invariants: MySQL wins over Redis; every post-claim write is fenced on

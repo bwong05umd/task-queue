@@ -20,6 +20,7 @@ class Settings:
     scheduler_tick_seconds: float
     metrics_port: int
     worker_id: str
+    api_key: str | None
 
 
 def _mysql_url() -> str:
@@ -50,4 +51,5 @@ def load() -> Settings:
         scheduler_tick_seconds=float(env("SCHEDULER_TICK_SECONDS", "0.5")),
         metrics_port=int(env("METRICS_PORT", "9100")),
         worker_id=env("WORKER_ID", f"{socket.gethostname()}-{os.getpid()}"),
+        api_key=env("API_KEY") or None,
     )

@@ -1,3 +1,5 @@
+import dataclasses
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -59,3 +61,15 @@ def test_dead_job_endpoints(client, worker):
 
 def test_health(client):
     assert client.get("/health").json() == {"status": "ok", "mysql": "ok", "redis": "ok"}
+
+
+def test_api_key_required_when_configured(settings, store, broker):
+    app = create_app(dataclasses.replace(settings, api_key="s3cret"), store, broker, register_metrics=False)
+    with TestClient(app) as c:
+        body = {"type": "sleep"}
+        assert c.post("/jobs", json=body).status_code == 401
+        assert c.post("/jobs", json=body, headers={"X-API-Key": "wrong"}).status_code == 401
+        assert c.post("/jobs", json=body, headers={"X-API-Key": "s3cret"}).status_code == 201
+        assert c.get("/dead-jobs").status_code == 401
+        assert c.get("/health").status_code == 200
+        assert c.get("/metrics").status_code == 200

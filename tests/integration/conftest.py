@@ -27,8 +27,13 @@ pytestmark = pytest.mark.integration
 def settings():
     s = config.load()
     return dataclasses.replace(
-        s, lease_seconds=0.5, heartbeat_seconds=0.1, backoff_base=0.05, backoff_cap=1.0,
-        reconcile_after_seconds=0, worker_id="test-worker",
+        s,
+        lease_seconds=0.5,
+        heartbeat_seconds=0.1,
+        backoff_base=0.05,
+        backoff_cap=1.0,
+        reconcile_after_seconds=0,
+        worker_id="test-worker",
     )
 
 
@@ -81,6 +86,7 @@ def submit(store, broker, settings):
         if push:
             broker.enqueue(job_id)
         return job_id
+
     return _submit
 
 

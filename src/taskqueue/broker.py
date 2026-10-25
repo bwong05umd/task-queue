@@ -21,24 +21,32 @@ local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
 
 # Pop the next job and lease it in one step, so a worker that dies right after
 # taking a job still leaves it in `processing` for the reaper to find.
-_CLAIM = _NOW_MS + """
+_CLAIM = (
+    _NOW_MS
+    + """
 local id = redis.call('LPOP', KEYS[1])
 if not id then return false end
 redis.call('ZADD', KEYS[2], now + tonumber(ARGV[1]), id)
 return id
 """
+)
 
 # Extend a lease only if it still exists; returns 0 when the lease was reaped.
-_EXTEND = _NOW_MS + """
+_EXTEND = (
+    _NOW_MS
+    + """
 if not redis.call('ZSCORE', KEYS[1], ARGV[1]) then return 0 end
 redis.call('ZADD', KEYS[1], now + tonumber(ARGV[2]), ARGV[1])
 return 1
 """
+)
 
 # Move every member of a zset whose score is due onto a list. Used both to
 # reap expired leases (processing -> queue) and to promote retries
 # (delayed -> queue).
-_MOVE_DUE = _NOW_MS + """
+_MOVE_DUE = (
+    _NOW_MS
+    + """
 local ids = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', now, 'LIMIT', 0, tonumber(ARGV[1]))
 for _, id in ipairs(ids) do
   redis.call('ZREM', KEYS[1], id)
@@ -46,19 +54,26 @@ for _, id in ipairs(ids) do
 end
 return ids
 """
+)
 
-_RETRY = _NOW_MS + """
+_RETRY = (
+    _NOW_MS
+    + """
 redis.call('ZREM', KEYS[1], ARGV[1])
 redis.call('ZADD', KEYS[2], now + tonumber(ARGV[2]), ARGV[1])
 return 1
 """
+)
 
 # NX keeps the first death time, so a job lands in the DLQ exactly once.
-_DEAD = _NOW_MS + """
+_DEAD = (
+    _NOW_MS
+    + """
 redis.call('ZREM', KEYS[1], ARGV[1])
 redis.call('ZADD', KEYS[2], 'NX', now, ARGV[1])
 return 1
 """
+)
 
 _REPLAY = """
 redis.call('ZREM', KEYS[1], ARGV[1])
@@ -67,7 +82,9 @@ return 1
 """
 
 # Re-push a job MySQL says is unfinished, unless Redis already tracks it.
-_REQUEUE_IF_UNKNOWN = _NOW_MS + """
+_REQUEUE_IF_UNKNOWN = (
+    _NOW_MS
+    + """
 if redis.call('ZSCORE', KEYS[2], ARGV[1]) or redis.call('ZSCORE', KEYS[3], ARGV[1]) then return 0 end
 if redis.call('LPOS', KEYS[1], ARGV[1]) then return 0 end
 local delay = tonumber(ARGV[2])
@@ -78,12 +95,17 @@ else
 end
 return 1
 """
+)
 
 
 class Broker:
     def __init__(self, url: str, prefix: str = "tq:"):
         self.r = redis.Redis.from_url(
-            url, decode_responses=True, socket_timeout=5, socket_connect_timeout=5, health_check_interval=30,
+            url,
+            decode_responses=True,
+            socket_timeout=5,
+            socket_connect_timeout=5,
+            health_check_interval=30,
         )
         self.prefix = prefix
         self.queue = f"{prefix}queue"

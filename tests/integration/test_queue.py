@@ -12,6 +12,7 @@ def status(store, job_id):
 
 # --- Milestone 1: basic queue ---------------------------------------------
 
+
 def test_job_runs_and_succeeds(worker, store, broker, submit):
     job_id = submit("image.resize", {"width": 800, "height": 600, "target_width": 400})
     assert worker.process_one()
@@ -34,6 +35,7 @@ def test_each_job_is_claimed_once(broker, submit):
 
 
 # --- Milestone 2: reliable delivery ---------------------------------------
+
 
 def test_expired_lease_is_reaped_back_onto_queue(broker, scheduler, submit):
     job_id = submit("sleep")
@@ -91,6 +93,7 @@ def test_email_handler_is_idempotent(worker, store, broker, submit):
 
 # --- Milestone 3: retries with backoff ------------------------------------
 
+
 def test_flaky_job_retries_then_succeeds(worker, scheduler, store, broker, submit):
     job_id = submit("flaky", {"fail_times": 2}, max_attempts=5)
     worker.process_one()
@@ -126,6 +129,7 @@ def test_permanent_error_is_not_retried(worker, store, submit):
 
 
 # --- Milestone 4: dead-letter queue ---------------------------------------
+
 
 def test_poison_job_lands_in_dlq_exactly_once(worker, scheduler, store, broker, submit):
     job_id = submit("poison", max_attempts=3)
@@ -167,10 +171,24 @@ def test_job_that_keeps_losing_its_lease_goes_dead(worker, scheduler, store, bro
 
 # --- Reconciliation -------------------------------------------------------
 
+
 def test_reconcile_repushes_jobs_redis_lost(scheduler, store, broker, submit):
-    lost = submit("sleep", push=False)       # API died before the Redis push
-    tracked = submit("sleep")                # still in the queue
+    lost = submit("sleep", push=False)  # API died before the Redis push
+    tracked = submit("sleep")  # still in the queue
     time.sleep(1.1)
     assert scheduler.reconcile() == [lost]
     assert sorted(broker.r.lrange(broker.queue, 0, -1)) == sorted([lost, tracked])
     assert scheduler.reconcile() == []
+
+
+def test_dead_job_succeeds_when_replayed_after_outage(worker, scheduler, store, broker, submit):
+    broker.r.set(f"{broker.prefix}outage", "1")
+    job_id = submit("external.call", max_attempts=2)
+    drain(worker, scheduler, lambda: status(store, job_id) == states.DEAD)
+    broker.r.delete(f"{broker.prefix}outage")
+    assert store.replay(job_id)
+    broker.replay(job_id)
+    worker.process_one()
+    job = store.get(job_id)
+    assert job["status"] == states.SUCCEEDED
+    assert [a["outcome"] for a in store.attempts(job_id)] == ["retry", "dead", "succeeded"]

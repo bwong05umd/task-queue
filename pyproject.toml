@@ -9,3 +9,15 @@ pythonpath = ["src"]
 testpaths = ["tests"]
 addopts = "-p no:cacheprovider"
 markers = ["integration: needs real Redis and MySQL (run via docker compose)"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = [
+  "B008",   # FastAPI Query() defaults in signatures are idiomatic
+  "UP038",  # isinstance(x, (A, B)) is clearer and faster than A | B
+]

@@ -6,21 +6,21 @@ import logging
 import os
 import sys
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-_context: contextvars.ContextVar[dict] = contextvars.ContextVar("log_context", default={})
+_context: contextvars.ContextVar[dict | None] = contextvars.ContextVar("log_context", default=None)
 _static: dict = {}
 
 
 class JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         data = {
-            "ts": datetime.fromtimestamp(record.created, timezone.utc).isoformat(timespec="milliseconds"),
+            "ts": datetime.fromtimestamp(record.created, UTC).isoformat(timespec="milliseconds"),
             "level": record.levelname.lower(),
             "logger": record.name,
             "msg": record.getMessage(),
             **_static,
-            **_context.get(),
+            **(_context.get() or {}),
             **getattr(record, "fields", {}),
         }
         if record.exc_info:
@@ -30,7 +30,7 @@ class JsonFormatter(logging.Formatter):
 
 @contextmanager
 def log_context(**fields):
-    token = _context.set({**_context.get(), **fields})
+    token = _context.set({**(_context.get() or {}), **fields})
     try:
         yield
     finally:

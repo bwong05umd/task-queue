@@ -5,8 +5,8 @@ from Redis and MySQL at scrape time."""
 import json
 import logging
 import threading
+from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Callable
 
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 from prometheus_client.core import GaugeMetricFamily
@@ -20,11 +20,15 @@ JOBS_RETRIED = Counter("tq_jobs_retried_total", "Failed attempts scheduled for r
 JOBS_DEAD = Counter("tq_jobs_dead_total", "Jobs moved to the dead-letter queue", ["type"])
 JOBS_STALE = Counter("tq_jobs_stale_total", "Results discarded because the lease was lost", ["type"])
 JOB_DURATION = Histogram(
-    "tq_job_duration_seconds", "Handler run time", ["type", "outcome"],
+    "tq_job_duration_seconds",
+    "Handler run time",
+    ["type", "outcome"],
     buckets=(0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120),
 )
 JOB_END_TO_END = Histogram(
-    "tq_job_end_to_end_seconds", "Submission to success, including queue wait and retries", ["type"],
+    "tq_job_end_to_end_seconds",
+    "Submission to success, including queue wait and retries",
+    ["type"],
     buckets=(0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, 600),
 )
 LEASES_REAPED = Counter("tq_leases_reaped_total", "Expired leases put back on the queue")
@@ -46,8 +50,9 @@ class QueueCollector:
             for name, n in self.broker.depths().items():
                 depth.add_metric([name], n)
             yield depth
-            yield GaugeMetricFamily("tq_active_workers", "Workers with a recent heartbeat",
-                                    value=self.broker.active_workers(self.window))
+            yield GaugeMetricFamily(
+                "tq_active_workers", "Workers with a recent heartbeat", value=self.broker.active_workers(self.window)
+            )
         except Exception:
             log.exception("could not read queue gauges from redis")
         try:

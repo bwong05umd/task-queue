@@ -6,8 +6,8 @@ import hashlib
 import logging
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 import redis
 
@@ -32,6 +32,7 @@ def handler(name: str):
     def register(fn: Handler) -> Handler:
         HANDLERS[name] = fn
         return fn
+
     return register
 
 
@@ -82,3 +83,13 @@ def flaky(payload: dict, ctx: JobContext):
 def poison(payload: dict, ctx: JobContext):
     """Always fails with a retryable error, so it ends in the dead-letter queue."""
     raise RetryableError("poison job always fails")
+
+
+@handler("external.call")
+def external_call(payload: dict, ctx: JobContext):
+    """Calls a pretend downstream service, which is "down" while the Redis key
+    {prefix}outage exists. The demo uses it to show a dead job being replayed
+    once the outage is over."""
+    if ctx.redis.exists(f"{ctx.key_prefix}outage"):
+        raise RetryableError("downstream service unavailable")
+    return {"status": "delivered", "endpoint": payload.get("endpoint", "https://example.com/hook")}

@@ -82,17 +82,26 @@ class JobStore:
 
     # --- API side -----------------------------------------------------------
 
-    def create(self, job_id: str, job_type: str, payload: dict, max_attempts: int,
-               idempotency_key: str | None = None) -> tuple[dict, bool]:
+    def create(
+        self, job_id: str, job_type: str, payload: dict, max_attempts: int, idempotency_key: str | None = None
+    ) -> tuple[dict, bool]:
         """Insert a queued job. Returns (job, created); with an idempotency key
         that was already used, returns the existing job and created=False."""
         try:
             with self.engine.begin() as c:
                 c.execute(
-                    text("INSERT INTO jobs (id, type, payload, status, max_attempts, idempotency_key) "
-                         "VALUES (:id, :type, :payload, :status, :max_attempts, :idem)"),
-                    {"id": job_id, "type": job_type, "payload": json.dumps(payload), "status": states.QUEUED,
-                     "max_attempts": max_attempts, "idem": idempotency_key},
+                    text(
+                        "INSERT INTO jobs (id, type, payload, status, max_attempts, idempotency_key) "
+                        "VALUES (:id, :type, :payload, :status, :max_attempts, :idem)"
+                    ),
+                    {
+                        "id": job_id,
+                        "type": job_type,
+                        "payload": json.dumps(payload),
+                        "status": states.QUEUED,
+                        "max_attempts": max_attempts,
+                        "idem": idempotency_key,
+                    },
                 )
         except IntegrityError:
             existing = idempotency_key and self.get_by_idempotency_key(idempotency_key)
@@ -114,14 +123,17 @@ class JobStore:
     def attempts(self, job_id: str) -> list[dict]:
         with self.engine.connect() as c:
             rows = c.execute(
-                text("SELECT attempt, worker_id, started_at, finished_at, outcome, error, traceback "
-                     "FROM job_attempts WHERE job_id = :id ORDER BY id"),
+                text(
+                    "SELECT attempt, worker_id, started_at, finished_at, outcome, error, traceback "
+                    "FROM job_attempts WHERE job_id = :id ORDER BY id"
+                ),
                 {"id": job_id},
             )
             return [dict(r._mapping) for r in rows]
 
-    def list_jobs(self, status: str | None = None, job_type: str | None = None,
-                  limit: int = 50, offset: int = 0) -> list[dict]:
+    def list_jobs(
+        self, status: str | None = None, job_type: str | None = None, limit: int = 50, offset: int = 0
+    ) -> list[dict]:
         where, params = ["1 = 1"], {"limit": limit, "offset": offset}
         if status:
             where.append("status = :status")
@@ -129,8 +141,10 @@ class JobStore:
         if job_type:
             where.append("type = :type")
             params["type"] = job_type
-        sql = (f"SELECT {_JOB_COLUMNS} FROM jobs WHERE {' AND '.join(where)} "
-               "ORDER BY updated_at DESC LIMIT :limit OFFSET :offset")
+        sql = (
+            f"SELECT {_JOB_COLUMNS} FROM jobs WHERE {' AND '.join(where)} "
+            "ORDER BY updated_at DESC LIMIT :limit OFFSET :offset"
+        )
         with self.engine.connect() as c:
             return [_job(r) for r in c.execute(text(sql), params)]
 
@@ -146,27 +160,37 @@ class JobStore:
         Returns None if the job is already finished (a duplicate delivery)."""
         with self.engine.begin() as c:
             res = c.execute(
-                text(f"UPDATE jobs SET status = '{states.RUNNING}', attempts = attempts + 1, run_token = :token, "
-                     f"next_run_at = NULL, started_at = NOW(3) WHERE id = :id AND status IN ({_CLAIMABLE})"),
+                text(
+                    f"UPDATE jobs SET status = '{states.RUNNING}', attempts = attempts + 1, run_token = :token, "
+                    f"next_run_at = NULL, started_at = NOW(3) WHERE id = :id AND status IN ({_CLAIMABLE})"
+                ),
                 {"id": job_id, "token": token},
             )
             if res.rowcount == 0:
                 return None
             # An attempt still open here belonged to a worker that lost its lease.
             c.execute(
-                text("UPDATE job_attempts SET outcome = 'lost', finished_at = NOW(3), "
-                     "error = 'lease expired before the attempt finished' "
-                     "WHERE job_id = :id AND finished_at IS NULL"),
+                text(
+                    "UPDATE job_attempts SET outcome = 'lost', finished_at = NOW(3), "
+                    "error = 'lease expired before the attempt finished' "
+                    "WHERE job_id = :id AND finished_at IS NULL"
+                ),
                 {"id": job_id},
             )
-            job = _job(c.execute(
-                text(f"SELECT {_JOB_COLUMNS}, TIMESTAMPDIFF(MICROSECOND, created_at, NOW(3)) AS age_us "
-                     "FROM jobs WHERE id = :id"),
-                {"id": job_id},
-            ).one())
+            job = _job(
+                c.execute(
+                    text(
+                        f"SELECT {_JOB_COLUMNS}, TIMESTAMPDIFF(MICROSECOND, created_at, NOW(3)) AS age_us "
+                        "FROM jobs WHERE id = :id"
+                    ),
+                    {"id": job_id},
+                ).one()
+            )
             c.execute(
-                text("INSERT INTO job_attempts (job_id, attempt, worker_id, run_token, started_at) "
-                     "VALUES (:id, :attempt, :worker, :token, NOW(3))"),
+                text(
+                    "INSERT INTO job_attempts (job_id, attempt, worker_id, run_token, started_at) "
+                    "VALUES (:id, :attempt, :worker, :token, NOW(3))"
+                ),
                 {"id": job_id, "attempt": job["attempts"], "worker": worker_id, "token": token},
             )
             return job
@@ -175,42 +199,64 @@ class JobStore:
         with self.engine.connect() as c:
             return c.execute(text("SELECT status FROM jobs WHERE id = :id"), {"id": job_id}).scalar()
 
-    def _finish(self, job_id: str, token: str, assignments: str, params: dict, outcome: str,
-                error: str | None = None, tb: str | None = None) -> bool:
+    def _finish(
+        self,
+        job_id: str,
+        token: str,
+        assignments: str,
+        params: dict,
+        outcome: str,
+        error: str | None = None,
+        tb: str | None = None,
+    ) -> bool:
         with self.engine.begin() as c:
             res = c.execute(
-                text(f"UPDATE jobs SET {assignments}, run_token = NULL "
-                     f"WHERE id = :id AND run_token = :token AND status = '{states.RUNNING}'"),
+                text(
+                    f"UPDATE jobs SET {assignments}, run_token = NULL "
+                    f"WHERE id = :id AND run_token = :token AND status = '{states.RUNNING}'"
+                ),
                 {"id": job_id, "token": token, **params},
             )
             if res.rowcount == 0:
                 return False
             c.execute(
-                text("UPDATE job_attempts SET outcome = :outcome, error = :error, traceback = :tb, "
-                     "finished_at = NOW(3) WHERE job_id = :id AND run_token = :token"),
+                text(
+                    "UPDATE job_attempts SET outcome = :outcome, error = :error, traceback = :tb, "
+                    "finished_at = NOW(3) WHERE job_id = :id AND run_token = :token"
+                ),
                 {"id": job_id, "token": token, "outcome": outcome, "error": error, "tb": tb},
             )
             return True
 
     def complete(self, job_id: str, token: str, result) -> bool:
         return self._finish(
-            job_id, token,
+            job_id,
+            token,
             f"status = '{states.SUCCEEDED}', result = :result, finished_at = NOW(3)",
-            {"result": json.dumps(result)}, "succeeded",
+            {"result": json.dumps(result)},
+            "succeeded",
         )
 
     def schedule_retry(self, job_id: str, token: str, delay_seconds: float, error: str, tb: str) -> bool:
         return self._finish(
-            job_id, token,
+            job_id,
+            token,
             f"status = '{states.QUEUED}', next_run_at = NOW(3) + INTERVAL :delay_us MICROSECOND, last_error = :error",
-            {"delay_us": int(delay_seconds * 1_000_000), "error": error}, "retry", error, tb,
+            {"delay_us": int(delay_seconds * 1_000_000), "error": error},
+            "retry",
+            error,
+            tb,
         )
 
     def mark_dead(self, job_id: str, token: str, error: str, tb: str | None) -> bool:
         return self._finish(
-            job_id, token,
+            job_id,
+            token,
             f"status = '{states.DEAD}', last_error = :error, finished_at = NOW(3)",
-            {"error": error}, "dead", error, tb,
+            {"error": error},
+            "dead",
+            error,
+            tb,
         )
 
     # --- dead-letter queue --------------------------------------------------
@@ -228,8 +274,10 @@ class JobStore:
         """Move a dead job back to queued with its attempts reset. History is kept."""
         with self.engine.begin() as c:
             res = c.execute(
-                text(f"UPDATE jobs SET status = '{states.QUEUED}', attempts = 0, next_run_at = NULL, "
-                     f"finished_at = NULL, run_token = NULL WHERE id = :id AND status = '{states.DEAD}'"),
+                text(
+                    f"UPDATE jobs SET status = '{states.QUEUED}', attempts = 0, next_run_at = NULL, "
+                    f"finished_at = NULL, run_token = NULL WHERE id = :id AND status = '{states.DEAD}'"
+                ),
                 {"id": job_id},
             )
             return res.rowcount == 1
@@ -239,8 +287,9 @@ class JobStore:
             return 0
         with self.engine.begin() as c:
             res = c.execute(
-                text(f"DELETE FROM jobs WHERE status = '{states.DEAD}' AND id IN :ids")
-                .bindparams(bindparam("ids", expanding=True)),
+                text(f"DELETE FROM jobs WHERE status = '{states.DEAD}' AND id IN :ids").bindparams(
+                    bindparam("ids", expanding=True)
+                ),
                 {"ids": ids},
             )
             c.execute(
@@ -257,9 +306,11 @@ class JobStore:
         died between the MySQL insert and the Redis push)."""
         with self.engine.connect() as c:
             rows = c.execute(
-                text("SELECT id, status, GREATEST(0, COALESCE(TIMESTAMPDIFF(MICROSECOND, NOW(3), next_run_at), 0)) "
-                     f"AS delay_us FROM jobs WHERE status IN ({_CLAIMABLE}) "
-                     "AND updated_at < NOW(3) - INTERVAL :s SECOND ORDER BY updated_at LIMIT :limit"),
+                text(
+                    "SELECT id, status, GREATEST(0, COALESCE(TIMESTAMPDIFF(MICROSECOND, NOW(3), next_run_at), 0)) "
+                    f"AS delay_us FROM jobs WHERE status IN ({_CLAIMABLE}) "
+                    "AND updated_at < NOW(3) - INTERVAL :s SECOND ORDER BY updated_at LIMIT :limit"
+                ),
                 {"s": int(older_than_seconds), "limit": limit},
             )
             return [dict(r._mapping) for r in rows]
