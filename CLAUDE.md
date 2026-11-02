@@ -1,9 +1,9 @@
 # Task Queue
 
 Mini Celery/Sidekiq in Python: FastAPI API, workers, scheduler (reaper, retry
-promoter, reconciler), Redis broker, MySQL source of truth. Build plan lives in
-the "Task Queue Build Plan" Claude Doc; Milestones 1-7 are done (stretch
-goals are next).
+promoter, reconciler), Redis broker, MySQL source of truth. Milestones 1-7
+of the build plan are done; stretch goals (priorities, recurring jobs, rate
+limits, admin dashboard) are next.
 
 - Run: `docker compose up -d` (needs `.env`, see `.env.example`)
 - Tests: `docker compose --profile test run --rm tests`; drills: `python3 scripts/chaos_test.py`

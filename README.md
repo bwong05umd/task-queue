@@ -267,3 +267,7 @@ docs/design.md   design decisions and tradeoffs
 
 Configuration is environment variables; see `src/taskqueue/config.py`
 (`LEASE_SECONDS`, `HEARTBEAT_SECONDS`, `DEFAULT_MAX_ATTEMPTS`, `BACKOFF_BASE`, ...).
+
+## License
+
+MIT; see [LICENSE](LICENSE).
